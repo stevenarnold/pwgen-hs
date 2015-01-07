@@ -41,6 +41,9 @@ stdAlternateCharset = "abcdefghijklmnopqrstuvwxyz"
 isCR :: Char -> Bool
 isCR char = '\r' == char
 
+isNotSpace :: Char -> Bool
+isNotSpace char = ' ' /= char
+
 countRegex :: String -> String -> Int 
 countRegex regex wordSoFar = wordSoFar =~ regex :: Int
 
@@ -51,13 +54,14 @@ regexIndices regex wordSoFar =
   map fst pairs
 
 wordOfNCharacters :: [String] -> String -> Int -> String
-wordOfNCharacters listOfWords wordSoFar n
+wordOfNCharacters (word:rest) wordSoFar n
   | length result >= n = take n result
-  | otherwise = wordOfNCharacters (tail listOfWords) result n
-  where result = wordSoFar ++ head listOfWords
+  | otherwise = wordOfNCharacters rest result n
+  where result = wordSoFar ++ (filter isNotSpace word)
+wordOfNCharacters _ wordSoFar _ = wordSoFar
 
 wordOfLengthN :: [String] -> Int -> String
-wordOfLengthN listOfWords n = do
+wordOfLengthN listOfWords n =
   wordOfNCharacters listOfWords "" n
 
 wordOfNChars :: (String -> CharLocation -> String) -> ([Char] -> [Char]) ->
