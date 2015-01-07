@@ -1,16 +1,12 @@
 module Main where
 
 import Data.Random
-import Data.Random
 import Data.Char
 import Data.List
 import Data.Time.Clock.POSIX
-import Data.Array ((!))
 import GHC.Arr
 import System.Environment
 import System.Random
-import Test.QuickCheck
-import Test.QuickCheck.Gen
 import Text.Regex
 import Text.Regex.Base
 import Text.Regex.Posix
@@ -25,12 +21,13 @@ data UserConfig = UserConfig {
                                 ucNumSpecials :: Int,
                                 ucSpecialsToUse :: String
                              } deriving (Show)
+userConfigDefault :: UserConfig
 userConfigDefault = UserConfig { 
                       ucPwordLength = 24, 
                       ucNumCapitals = 3, 
                       ucNumNumbers = 1, 
                       ucNumSpecials = 1,
-                      ucSpecialsToUse = ".\\-_"
+                      ucSpecialsToUse = "._-"
                     }
 
 letterRegex, numberRegex, stdAlternateCharset :: [Char]
@@ -65,12 +62,12 @@ wordOfLengthN listOfWords n = do
 
 wordOfNChars :: (String -> CharLocation -> String) -> ([Char] -> [Char]) ->
                 String -> String -> [CharLocation] -> Maybe String
-wordOfNChars handlePerIndex permuteCandidate regex candidate indices 
+wordOfNChars handlePerIndex permuteCandidate regex candidate replIndices 
   | numToChange == 0 = Just candidate
   | numToChange > length candidate = Nothing
   | numOccurrences == numToChange = Just candidate
-  | otherwise = Just $ foldl handlePerIndex (permuteCandidate candidate) indices
-  where numToChange = length indices
+  | otherwise = Just $ foldl handlePerIndex (permuteCandidate candidate) replIndices
+  where numToChange = length replIndices
         numOccurrences = countRegex regex candidate
 
 wordOfNCapitals, wordOfNNumbers, wordOfNSpecial :: String -> String -> [CharLocation] -> Maybe String
@@ -102,8 +99,6 @@ permuteWithCharset :: StdGen -> (String -> String -> [CharLocation] -> Maybe Str
                       -> String -> [Int] -> String -> String -> String -> Int -> Maybe String
 permuteWithCharset _ _ _ _ _ _ candidate 0 = Just candidate
 permuteWithCharset gen mainFn regex shuffMatches charset altCharset candidate replacements = 
-  let indices = randoms gen :: [Int] in
-  let toCharset = take replacements charset in
   let locations = getIndicesToModify gen regex shuffMatches charset altCharset replacements candidate in
   mainFn regex candidate locations
 
@@ -111,18 +106,19 @@ getIndicesToModify :: StdGen -> String -> [Int] -> String -> String -> Int -> St
 getIndicesToModify gen charRegex shuffMatches primaryCharset alternateCharset targetNum candidate
   | occurences >  targetNum = 
       let removals = occurences - targetNum in 
-      let altChars = map (\i -> CharLocation i $ alternateCharset !! i) indices in
+      let altChars = map (\i -> CharLocation i $ alternateCharset !! i) replIndices in
       take removals altChars
   | occurences == targetNum = []
   | occurences <  targetNum = findSlots targetNum
   where occurences = countRegex charRegex candidate
-        indices = randomRs (0, (length alternateCharset) - 1) gen
+        replIndices = randomRs (0, (length alternateCharset) - 1) gen
         findSlots additions
           | additions == 0 = []
           | additions > length candidate = []
           | otherwise =
               let candidate_char_idxs = take additions $ shuffMatches in
               zipWith CharLocation candidate_char_idxs primaryCharset 
+getIndicesToModify _ _ _ _ _ _ _ = []
 
 generate :: (String -> String -> [CharLocation] -> Maybe String)
             -> String -> String -> String -> [Char] -> [Char] -> Int -> IO [Char]
