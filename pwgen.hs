@@ -4,12 +4,8 @@ import Data.Random
 import Data.Char
 import Data.List
 import Data.Time.Clock.POSIX
-import GHC.Arr
 import System.Environment
 import System.Random
-import Text.Regex
-import Text.Regex.Base
-import Text.Regex.Posix
 
 data CharLocation  = CharLocation Int Char
                      deriving (Show)
@@ -30,13 +26,25 @@ userConfigDefault = UserConfig {
                       ucSpecialsToUse = "._-"
                     }
 
-letterRegex, numberRegex, stdAlternateCharset :: [Char]
-letterRegex = "[A-Z]"
-numberRegex = "[0-9]"
-specialRegex, specialNotRegex :: String -> String
-specialRegex core = "[" ++ core ++ "]"
-specialNotRegex core = "[^" ++ core ++ "]"
-stdAlternateCharset = "abcdefghijklmnopqrstuvwxyz"
+letterCharClass, numberCharClass :: Char -> Bool
+letterCharClass = Data.Char.isUpper
+numberCharClass = Data.Char.isDigit
+stdAlternateCharset, capitalCharset, numericCharset :: [Char]
+stdAlternateCharset = ['a' .. 'z']
+-- These probably should be predicates
+capitalCharset = ['A' .. 'Z']
+numericCharset = ['0' .. '9']
+specialCharClass, specialNotCharClass :: [Char] -> (Char -> Bool)
+specialCharClass = mkCharsetPredicate True
+specialNotCharClass = mkCharsetPredicate False
+
+mkCharsetPredicate :: Bool -> [Char] -> (Char -> Bool)
+mkCharsetPredicate positive charset =
+  charsetPredicate 
+  where charsetPredicate char = if positive then
+                                  elem char charset
+                                else
+                                  not $ elem char charset
 
 isCR :: Char -> Bool
 isCR char = '\r' == char
@@ -44,14 +52,15 @@ isCR char = '\r' == char
 isNotSpace :: Char -> Bool
 isNotSpace char = ' ' /= char
 
-countRegex :: String -> String -> Int 
-countRegex regex wordSoFar = wordSoFar =~ regex :: Int
+countCharClass :: (Char -> Bool) -> String -> Int 
+countCharClass charClass wordSoFar = length $ filter charClass wordSoFar
 
-regexIndices :: String -> String -> [Int]
-regexIndices regex wordSoFar = 
-  let cregex = makeRegex regex :: Regex in
-  let pairs = map (!0) $ matchAll cregex wordSoFar in 
-  map fst pairs
+charClassIndices :: (Char -> Bool) -> String -> [Int]
+charClassIndices charClassP wordSoFar = 
+  foldl (\l (c,i) -> if charClassP c then
+                   i : l 
+                 else
+                   l) [] $ zip wordSoFar [0..]
 
 wordOfNCharacters :: [String] -> String -> Int -> String
 wordOfNCharacters (word:rest) wordSoFar n
@@ -65,16 +74,16 @@ wordOfLengthN listOfWords n =
   wordOfNCharacters listOfWords "" n
 
 wordOfNChars :: (String -> CharLocation -> String) -> ([Char] -> [Char]) ->
-                String -> String -> [CharLocation] -> Maybe String
+                (Char -> Bool) -> String -> [CharLocation] -> Maybe String
 wordOfNChars handlePerIndex permuteCandidate regex candidate replIndices 
   | numToChange == 0 = Just candidate
   | numToChange > length candidate = Nothing
   | numOccurrences == numToChange = Just candidate
   | otherwise = Just $ foldl handlePerIndex (permuteCandidate candidate) replIndices
   where numToChange = length replIndices
-        numOccurrences = countRegex regex candidate
+        numOccurrences = countCharClass regex candidate
 
-wordOfNCapitals, wordOfNNumbers, wordOfNSpecial :: String -> String -> [CharLocation] -> Maybe String
+wordOfNCapitals, wordOfNNumbers, wordOfNSpecial :: (Char -> Bool) -> String -> [CharLocation] -> Maybe String
 wordOfNCapitals = wordOfNChars capitalizePerIndex (\candidate -> map toLower candidate)
 wordOfNNumbers  = wordOfNChars numericPerIndex id
 wordOfNSpecial  = wordOfNChars specialPerIndex id
@@ -99,22 +108,22 @@ uniqueRandomList randNums lower upper count =
   take count $ nub $ map (\a -> a `mod` (upper - lower) + lower)
                    (take (count * 50) randNums)
 
-permuteWithCharset :: StdGen -> (String -> String -> [CharLocation] -> Maybe String)
-                      -> String -> [Int] -> String -> String -> String -> Int -> Maybe String
+permuteWithCharset :: StdGen -> ((Char -> Bool) -> String -> [CharLocation] -> Maybe String)
+                      -> (Char -> Bool) -> [Int] -> String -> String -> String -> Int -> Maybe String
 permuteWithCharset _ _ _ _ _ _ candidate 0 = Just candidate
 permuteWithCharset gen mainFn regex shuffMatches charset altCharset candidate replacements = 
   let locations = getIndicesToModify gen regex shuffMatches charset altCharset replacements candidate in
   mainFn regex candidate locations
 
-getIndicesToModify :: StdGen -> String -> [Int] -> String -> String -> Int -> String -> [CharLocation]
-getIndicesToModify gen charRegex shuffMatches primaryCharset alternateCharset targetNum candidate
+getIndicesToModify :: StdGen -> (Char -> Bool) -> [Int] -> String -> String -> Int -> String -> [CharLocation]
+getIndicesToModify gen charCharClass shuffMatches primaryCharset alternateCharset targetNum candidate
   | occurences >  targetNum = 
       let removals = occurences - targetNum in 
       let altChars = map (\i -> CharLocation i $ alternateCharset !! i) replIndices in
       take removals altChars
   | occurences == targetNum = []
   | occurences <  targetNum = findSlots targetNum
-  where occurences = countRegex charRegex candidate
+  where occurences = countCharClass charCharClass candidate
         replIndices = randomRs (0, (length alternateCharset) - 1) gen
         findSlots additions
           | additions == 0 = []
@@ -124,9 +133,9 @@ getIndicesToModify gen charRegex shuffMatches primaryCharset alternateCharset ta
               zipWith CharLocation candidate_char_idxs primaryCharset 
 getIndicesToModify _ _ _ _ _ _ _ = []
 
-generate :: (String -> String -> [CharLocation] -> Maybe String)
-            -> String -> String -> String -> [Char] -> [Char] -> Int -> IO [Char]
-generate permuteFn word regex inverseRegex charset altCharset count = do
+generate :: ((Char -> Bool) -> String -> [CharLocation] -> Maybe String)
+            -> String -> (Char -> Bool) -> String -> [Char] -> Int -> IO [Char]
+generate permuteFn word charsetp charset altCharset count = do
   pt <- getPOSIXTime
   let time = round (pt * 1000000)
   let gen = mkStdGen time
@@ -134,28 +143,28 @@ generate permuteFn word regex inverseRegex charset altCharset count = do
   print shuffCharset
   shuffAltCharset <- runRVar (shuffle altCharset) StdRandom
   print shuffAltCharset
-  shuffMatches <- runRVar (shuffle $ regexIndices inverseRegex word) StdRandom
-  case permuteWithCharset gen permuteFn regex shuffMatches shuffCharset shuffAltCharset word count of
+  shuffMatches <- runRVar (shuffle (charClassIndices (not . charsetp) word)) StdRandom
+  case permuteWithCharset gen permuteFn charsetp shuffMatches shuffCharset shuffAltCharset word count of
     Nothing -> return ""
     Just x -> return x
 
-try :: String -> UserConfig -> IO [Char]
-try baseWord configs = do
+attemptCandidate :: String -> UserConfig -> IO [Char]
+attemptCandidate baseWord configs = do
   let core = ucSpecialsToUse configs
   let numNums = ucNumNumbers configs 
   let numCaps = ucNumCapitals configs 
   let numSpecials = ucNumSpecials configs
   print $ "baseWord = " ++ baseWord
-  wordWithCaps <- generate wordOfNCapitals baseWord letterRegex "[^A-Z]" "ABCDEFGHIJKLMNOPQRSTUVWXYZ" stdAlternateCharset numCaps
+  wordWithCaps <- generate wordOfNCapitals baseWord letterCharClass capitalCharset stdAlternateCharset numCaps
   print wordWithCaps
-  wordWithNums <- generate wordOfNNumbers wordWithCaps numberRegex "[^0-9]" "0123456789" stdAlternateCharset numNums
+  wordWithNums <- generate wordOfNNumbers wordWithCaps numberCharClass numericCharset stdAlternateCharset numNums
   print wordWithNums
-  wordWithSpecial <- generate wordOfNSpecial wordWithNums (specialRegex core) (specialNotRegex core) core stdAlternateCharset numSpecials
+  wordWithSpecial <- generate wordOfNSpecial wordWithNums (specialCharClass core) core stdAlternateCharset numSpecials
   print $ "wordWithSpecial = " ++ wordWithSpecial
   if baseWord == wordWithSpecial then
     return wordWithSpecial
   else
-    try wordWithSpecial configs
+    attemptCandidate wordWithSpecial configs
 
 parseArgs :: [String] -> UserConfig -> IO UserConfig
 parseArgs [] config = return config
@@ -196,5 +205,5 @@ main = do
   let listOfWords = map (filter (not . isCR)) (lines file)
   shuffledWords <- runRVar (shuffle listOfWords) StdRandom
   let word = wordOfLengthN shuffledWords $ ucPwordLength configs
-  final <- try word configs
+  final <- attemptCandidate word configs
   print final
