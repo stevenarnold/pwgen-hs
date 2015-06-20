@@ -6,6 +6,7 @@ import Data.List
 import Data.Time.Clock.POSIX
 import System.Environment
 import System.Random
+import System.FilePath.Posix
 
 data CharLocation  = CharLocation Int Char
                      deriving (Show)
@@ -13,17 +14,21 @@ type CharLocations = [CharLocation]
 data UserConfig = UserConfig { 
                                 ucPwordLength :: Int,
                                 ucNumCapitals :: Int,
-                                ucNumNumbers :: Int, 
+                                ucNumNumbers :: Maybe Int, 
+                                ucMinNumbers :: Maybe Int,
                                 ucNumSpecials :: Int,
-                                ucSpecialsToUse :: String
+                                ucSpecialsToUse :: String,
+                                ucHelpRequested :: Bool
                              } deriving (Show)
 userConfigDefault :: UserConfig
 userConfigDefault = UserConfig { 
                       ucPwordLength = 24, 
                       ucNumCapitals = 3, 
-                      ucNumNumbers = 1, 
+                      ucNumNumbers = Nothing,
+                      ucMinNumbers = Just 1, 
                       ucNumSpecials = 1,
-                      ucSpecialsToUse = "._-"
+                      ucSpecialsToUse = "._-",
+                      ucHelpRequested = False
                     }
 
 letterCharClass, numberCharClass :: Char -> Bool
@@ -140,27 +145,35 @@ generate permuteFn word charsetp charset altCharset count = do
   let time = round (pt * 1000000)
   let gen = mkStdGen time
   shuffCharset <- runRVar (shuffle charset) StdRandom
-  print shuffCharset
+  --print shuffCharset
   shuffAltCharset <- runRVar (shuffle altCharset) StdRandom
-  print shuffAltCharset
+  --print shuffAltCharset
   shuffMatches <- runRVar (shuffle (charClassIndices (not . charsetp) word)) StdRandom
   case permuteWithCharset gen permuteFn charsetp shuffMatches shuffCharset shuffAltCharset word count of
     Nothing -> return ""
     Just x -> return x
 
+generateNumberOfNumbers :: UserConfig -> Int
+generateNumberOfNumbers configs =
+  case ucNumNumbers configs of
+    Just x    -> x
+    Nothing   -> case ucMinNumbers configs of
+                   Just x    -> x
+                   Nothing   -> 1
+
 attemptCandidate :: String -> UserConfig -> IO [Char]
 attemptCandidate baseWord configs = do
   let core = ucSpecialsToUse configs
-  let numNums = ucNumNumbers configs 
+  let numNums = generateNumberOfNumbers configs
   let numCaps = ucNumCapitals configs 
   let numSpecials = ucNumSpecials configs
-  print $ "baseWord = " ++ baseWord
+  --p rint $ "baseWord = " ++ baseWord
   wordWithCaps <- generate wordOfNCapitals baseWord letterCharClass capitalCharset stdAlternateCharset numCaps
-  print wordWithCaps
+  --print wordWithCaps
   wordWithNums <- generate wordOfNNumbers wordWithCaps numberCharClass numericCharset stdAlternateCharset numNums
-  print wordWithNums
+  --print wordWithNums
   wordWithSpecial <- generate wordOfNSpecial wordWithNums (specialCharClass core) core stdAlternateCharset numSpecials
-  print $ "wordWithSpecial = " ++ wordWithSpecial
+  --print $ "wordWithSpecial = " ++ wordWithSpecial
   if baseWord == wordWithSpecial then
     return wordWithSpecial
   else
@@ -184,6 +197,11 @@ parseArgs args config
   = parseArgs rest
   $ config { ucNumNumbers = read numNumbers }
   
+  | flag : minNumbers : rest          <- args
+  , elem flag ["-mn", "--min-numbers"]
+  = parseArgs rest
+  $ config { ucMinNumbers = Just $ read minNumbers }
+  
   | flag : numSpecials : rest          <- args
   , elem flag ["-s", "--specials"]
   = parseArgs rest
@@ -193,6 +211,11 @@ parseArgs args config
   , elem flag ["-u", "--use_specials"]
   = parseArgs rest
   $ config { ucSpecialsToUse = specialsToUse }
+   
+  | flag : rest          <- args
+  , elem flag ["-h", "--help"]
+  = parseArgs rest
+  $ config { ucHelpRequested = True }
  
   | otherwise
   = error $ "Cannot parse arguments " ++ show args
@@ -201,9 +224,32 @@ main :: IO ()
 main = do
   argv <- getArgs
   configs <- parseArgs argv userConfigDefault
-  file <- readFile "wordlist.txt"
-  let listOfWords = map (filter (not . isCR)) (lines file)
-  shuffledWords <- runRVar (shuffle listOfWords) StdRandom
-  let word = wordOfLengthN shuffledWords $ ucPwordLength configs
-  final <- attemptCandidate word configs
-  print final
+  if ucHelpRequested configs == True then do
+    print "pwgen help"
+    print "----------"
+    print "Usage: pwgen [options]"
+    print "  Options:"
+    print "    -l <length>| --length <length>"
+    print "      Specify the desired length of the password."
+    print "    -c <count> | --capitals <count>"
+    print "      Specify the count of capital letters to use"
+    print "      in the password, or use default"
+    print "    -n <count> | --numbers <count>"
+    print "      Specify the count of numeric digits to use"
+    print "      in the password, or use default"
+    print "    -s <count> | --specials <count>"
+    print "      Specify the count of special characters (such as"
+    print "      %, $, *, !) to use in the password, or use default"
+    print "    -u <charlist> | --use_specials <charlist>"
+    print "      Specify the character list to use for special"
+    print "      characters"
+  else do
+    binpath <- getExecutablePath
+    let path = takeDirectory binpath
+    print $ path ++ "/wordlist.txt"
+    file <- readFile $ path ++ "/wordlist.txt"
+    let listOfWords = map (filter (not . isCR)) (lines file)
+    shuffledWords <- runRVar (shuffle listOfWords) StdRandom
+    let word = wordOfLengthN shuffledWords $ ucPwordLength configs
+    final <- attemptCandidate word configs
+    print final
