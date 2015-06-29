@@ -170,9 +170,9 @@ generateNumberOfNumbers configs =
     Just x    -> return x
     Nothing   -> case (ucMinNumbers configs, ucMaxNumbers configs) of
                    (Nothing, Nothing) -> return 0
-                   (Nothing, Just y)  -> runRVar (uniform 0 (y - 1)) StdRandom
+                   (Nothing, Just y)  -> runRVar (uniform 0 y) StdRandom
                    (Just x, Nothing)  -> return x
-                   (Just x, Just y)   -> runRVar (uniform (x - 1) y) StdRandom
+                   (Just x, Just y)   -> runRVar (uniform x y) StdRandom
 
 generateNumberOfCapitals :: UserConfig -> IO Int
 generateNumberOfCapitals configs =
@@ -180,9 +180,9 @@ generateNumberOfCapitals configs =
     Just x    -> return x
     Nothing   -> case (ucMinCapitals configs, ucMaxCapitals configs) of
                    (Nothing, Nothing) -> return 0
-                   (Nothing, Just y)  -> runRVar (uniform 0 (y - 1)) StdRandom
+                   (Nothing, Just y)  -> runRVar (uniform 0 y) StdRandom
                    (Just x, Nothing)  -> return x
-                   (Just x, Just y)   -> runRVar (uniform (x - 1) y) StdRandom
+                   (Just x, Just y)   -> runRVar (uniform x y) StdRandom
 
 generateNumberOfSpecials :: UserConfig -> IO Int
 generateNumberOfSpecials configs =
@@ -190,9 +190,9 @@ generateNumberOfSpecials configs =
     Just x    -> return x
     Nothing   -> case (ucMinSpecials configs, ucMaxSpecials configs) of
                    (Nothing, Nothing) -> return 0
-                   (Nothing, Just y)  -> runRVar (uniform 0 (y - 1)) StdRandom
+                   (Nothing, Just y)  -> runRVar (uniform 0 y) StdRandom
                    (Just x, Nothing)  -> return x
-                   (Just x, Just y)   -> runRVar (uniform (x - 1) y) StdRandom
+                   (Just x, Just y)   -> runRVar (uniform x y) StdRandom
 
 attemptCandidate :: UserConfig -> String -> Int -> Int -> Int -> IO [Char]
 attemptCandidate configs baseWord numCaps numNums numSpecials = do
