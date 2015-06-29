@@ -12,21 +12,31 @@ data CharLocation  = CharLocation Int Char
                      deriving (Show)
 type CharLocations = [CharLocation]
 data UserConfig = UserConfig { 
-                                ucPwordLength :: Int,
-                                ucNumCapitals :: Int,
-                                ucNumNumbers :: Maybe Int, 
-                                ucMinNumbers :: Maybe Int,
-                                ucNumSpecials :: Int,
+                                ucPwordLength   :: Int,
+                                ucNumCapitals   :: Maybe Int,
+                                ucMinCapitals   :: Maybe Int,
+                                ucMaxCapitals   :: Maybe Int,
+                                ucNumNumbers    :: Maybe Int, 
+                                ucMinNumbers    :: Maybe Int,
+                                ucMaxNumbers    :: Maybe Int,
+                                ucNumSpecials   :: Maybe Int,
+                                ucMinSpecials   :: Maybe Int,
+                                ucMaxSpecials   :: Maybe Int,
                                 ucSpecialsToUse :: String,
                                 ucHelpRequested :: Bool
                              } deriving (Show)
 userConfigDefault :: UserConfig
 userConfigDefault = UserConfig { 
                       ucPwordLength = 24, 
-                      ucNumCapitals = 3, 
+                      ucNumCapitals = Nothing, 
+                      ucMinCapitals = Just 1,
+                      ucMaxCapitals = Just 3,
                       ucNumNumbers = Nothing,
                       ucMinNumbers = Just 1, 
-                      ucNumSpecials = 1,
+                      ucMaxNumbers = Just 1, 
+                      ucNumSpecials = Nothing,
+                      ucMinSpecials = Just 1,
+                      ucMaxSpecials = Just 2,
                       ucSpecialsToUse = "._-",
                       ucHelpRequested = False
                     }
@@ -95,12 +105,12 @@ wordOfNSpecial  = wordOfNChars specialPerIndex id
 
 capitalizePerIndex :: String -> CharLocation -> String
 capitalizePerIndex word (CharLocation idx replacement) 
-  | isLower (word !! idx) = concat [take idx word, [toUpper (word !! idx)], drop (idx + 1) word]
+  | isLower $ word !! idx = concat [take idx word, [toUpper (word !! idx)], drop (idx + 1) word]
   | otherwise             = concat [take idx word, [replacement], drop (idx + 1) word]
 
 numericPerIndex :: String -> CharLocation -> String
 numericPerIndex word (CharLocation idx replacement) 
-  | isNumber (word !! idx) = concat [take idx word, [(word !! idx)], drop (idx + 1) word]
+  | isNumber $ word !! idx = concat [take idx word, [(word !! idx)], drop (idx + 1) word]
   | otherwise              = concat [take idx word, [replacement], drop (idx + 1) word]
 
 specialPerIndex :: String -> CharLocation -> String
@@ -124,7 +134,8 @@ getIndicesToModify :: StdGen -> (Char -> Bool) -> [Int] -> String -> String -> I
 getIndicesToModify gen charCharClass shuffMatches primaryCharset alternateCharset targetNum candidate
   | occurences >  targetNum = 
       let removals = occurences - targetNum in 
-      let altChars = map (\i -> CharLocation i $ alternateCharset !! i) replIndices in
+      let indexesToRemove = take removals shuffMatches in
+      let altChars = map (\(rmv, i) -> CharLocation rmv $ alternateCharset !! i) $ zip indexesToRemove replIndices in
       take removals altChars
   | occurences == targetNum = []
   | occurences <  targetNum = findSlots targetNum
@@ -153,21 +164,40 @@ generate permuteFn word charsetp charset altCharset count = do
     Nothing -> return ""
     Just x -> return x
 
-generateNumberOfNumbers :: UserConfig -> Int
+generateNumberOfNumbers :: UserConfig -> IO Int
 generateNumberOfNumbers configs =
   case ucNumNumbers configs of
-    Just x    -> x
-    Nothing   -> case ucMinNumbers configs of
-                   Just x    -> x
-                   Nothing   -> 1
+    Just x    -> return x
+    Nothing   -> case (ucMinNumbers configs, ucMaxNumbers configs) of
+                   (Nothing, Nothing) -> return 0
+                   (Nothing, Just y)  -> runRVar (uniform 0 (y - 1)) StdRandom
+                   (Just x, Nothing)  -> return x
+                   (Just x, Just y)   -> runRVar (uniform (x - 1) y) StdRandom
 
-attemptCandidate :: String -> UserConfig -> IO [Char]
-attemptCandidate baseWord configs = do
+generateNumberOfCapitals :: UserConfig -> IO Int
+generateNumberOfCapitals configs =
+  case ucNumCapitals configs of
+    Just x    -> return x
+    Nothing   -> case (ucMinCapitals configs, ucMaxCapitals configs) of
+                   (Nothing, Nothing) -> return 0
+                   (Nothing, Just y)  -> runRVar (uniform 0 (y - 1)) StdRandom
+                   (Just x, Nothing)  -> return x
+                   (Just x, Just y)   -> runRVar (uniform (x - 1) y) StdRandom
+
+generateNumberOfSpecials :: UserConfig -> IO Int
+generateNumberOfSpecials configs =
+  case ucNumSpecials configs of
+    Just x    -> return x
+    Nothing   -> case (ucMinSpecials configs, ucMaxSpecials configs) of
+                   (Nothing, Nothing) -> return 0
+                   (Nothing, Just y)  -> runRVar (uniform 0 (y - 1)) StdRandom
+                   (Just x, Nothing)  -> return x
+                   (Just x, Just y)   -> runRVar (uniform (x - 1) y) StdRandom
+
+attemptCandidate :: UserConfig -> String -> Int -> Int -> Int -> IO [Char]
+attemptCandidate configs baseWord numCaps numNums numSpecials = do
   let core = ucSpecialsToUse configs
-  let numNums = generateNumberOfNumbers configs
-  let numCaps = ucNumCapitals configs 
-  let numSpecials = ucNumSpecials configs
-  --p rint $ "baseWord = " ++ baseWord
+  --print $ "baseword = " ++ baseWord
   wordWithCaps <- generate wordOfNCapitals baseWord letterCharClass capitalCharset stdAlternateCharset numCaps
   --print wordWithCaps
   wordWithNums <- generate wordOfNNumbers wordWithCaps numberCharClass numericCharset stdAlternateCharset numNums
@@ -177,7 +207,7 @@ attemptCandidate baseWord configs = do
   if baseWord == wordWithSpecial then
     return wordWithSpecial
   else
-    attemptCandidate wordWithSpecial configs
+    attemptCandidate configs wordWithSpecial numCaps numNums numSpecials
 
 parseArgs :: [String] -> UserConfig -> IO UserConfig
 parseArgs [] config = return config
@@ -186,11 +216,6 @@ parseArgs args config
   , elem flag ["-l", "--length"]
   = parseArgs rest
   $ config { ucPwordLength = read pwordLength }
-  
-  | flag : numCapitals : rest          <- args
-  , elem flag ["-c", "--capitals"]
-  = parseArgs rest
-  $ config { ucNumCapitals = read numCapitals }
   
   | flag : numNumbers : rest          <- args
   , elem flag ["-n", "--numbers"]
@@ -202,10 +227,40 @@ parseArgs args config
   = parseArgs rest
   $ config { ucMinNumbers = Just $ read minNumbers }
   
+  | flag : maxNumbers : rest          <- args
+  , elem flag ["-xn", "--max-numbers"]
+  = parseArgs rest
+  $ config { ucMaxNumbers = Just $ read maxNumbers }
+  
+  | flag : numCapitals : rest          <- args
+  , elem flag ["-c", "--capitals"]
+  = parseArgs rest
+  $ config { ucNumCapitals = read numCapitals }
+  
+  | flag : minCapitals : rest          <- args
+  , elem flag ["-mc", "--min-capitals"]
+  = parseArgs rest
+  $ config { ucMinNumbers = Just $ read minCapitals }
+  
+  | flag : maxCapitals : rest          <- args
+  , elem flag ["-xc", "--max-capitals"]
+  = parseArgs rest
+  $ config { ucMaxNumbers = Just $ read maxCapitals }
+  
   | flag : numSpecials : rest          <- args
   , elem flag ["-s", "--specials"]
   = parseArgs rest
-  $ config { ucNumSpecials = read numSpecials }
+  $ config { ucNumSpecials = Just $ read numSpecials }
+  
+  | flag : minSpecials : rest          <- args
+  , elem flag ["-xs", "--min-specials"]
+  = parseArgs rest
+  $ config { ucMinSpecials = Just $ read minSpecials }
+  
+  | flag : maxSpecials : rest          <- args
+  , elem flag ["-ms", "--max-specials"]
+  = parseArgs rest
+  $ config { ucMaxSpecials = Just $ read maxSpecials }
    
   | flag : specialsToUse : rest          <- args
   , elem flag ["-u", "--use_specials"]
@@ -246,10 +301,18 @@ main = do
   else do
     binpath <- getExecutablePath
     let path = takeDirectory binpath
-    print $ path ++ "/wordlist.txt"
+    --print $ path ++ "/wordlist.txt"
     file <- readFile $ path ++ "/wordlist.txt"
     let listOfWords = map (filter (not . isCR)) (lines file)
     shuffledWords <- runRVar (shuffle listOfWords) StdRandom
     let word = wordOfLengthN shuffledWords $ ucPwordLength configs
-    final <- attemptCandidate word configs
+    numNums <- generateNumberOfNumbers configs
+    numCaps <- generateNumberOfCapitals configs 
+    numSpecials <- generateNumberOfSpecials configs
+    --print $ "baseWord = " ++ word
+    --print $ "configs = " ++ show configs
+    print $ "numNums = " ++ show numNums
+    print $ "numCaps = " ++ show numCaps
+    print $ "numSpecials = " ++ show numSpecials
+    final <- attemptCandidate configs word numCaps numNums numSpecials
     print final
