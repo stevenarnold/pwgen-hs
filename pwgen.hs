@@ -171,7 +171,7 @@ generateNumberOfNumbers configs =
     Nothing   -> case (ucMinNumbers configs, ucMaxNumbers configs) of
                    (Nothing, Nothing) -> return 0
                    (Nothing, Just y)  -> runRVar (uniform 0 y) StdRandom
-                   (Just x, Nothing)  -> return x
+                   (Just x, Nothing)  -> runRVar (uniform x $ ucPwordLength configs) StdRandom
                    (Just x, Just y)   -> runRVar (uniform x y) StdRandom
 
 generateNumberOfCapitals :: UserConfig -> IO Int
@@ -181,7 +181,7 @@ generateNumberOfCapitals configs =
     Nothing   -> case (ucMinCapitals configs, ucMaxCapitals configs) of
                    (Nothing, Nothing) -> return 0
                    (Nothing, Just y)  -> runRVar (uniform 0 y) StdRandom
-                   (Just x, Nothing)  -> return x
+                   (Just x, Nothing)  -> runRVar (uniform x $ ucPwordLength configs) StdRandom
                    (Just x, Just y)   -> runRVar (uniform x y) StdRandom
 
 generateNumberOfSpecials :: UserConfig -> IO Int
@@ -191,7 +191,7 @@ generateNumberOfSpecials configs =
     Nothing   -> case (ucMinSpecials configs, ucMaxSpecials configs) of
                    (Nothing, Nothing) -> return 0
                    (Nothing, Just y)  -> runRVar (uniform 0 y) StdRandom
-                   (Just x, Nothing)  -> return x
+                   (Just x, Nothing)  -> runRVar (uniform x $ ucPwordLength configs) StdRandom
                    (Just x, Just y)   -> runRVar (uniform x y) StdRandom
 
 attemptCandidate :: UserConfig -> String -> Int -> Int -> Int -> IO [Char]
@@ -240,12 +240,12 @@ parseArgs args config
   | flag : minCapitals : rest          <- args
   , elem flag ["-mc", "--min-capitals"]
   = parseArgs rest
-  $ config { ucMinNumbers = Just $ read minCapitals }
+  $ config { ucMinCapitals = Just $ read minCapitals }
   
   | flag : maxCapitals : rest          <- args
   , elem flag ["-xc", "--max-capitals"]
   = parseArgs rest
-  $ config { ucMaxNumbers = Just $ read maxCapitals }
+  $ config { ucMaxCapitals = Just $ read maxCapitals }
   
   | flag : numSpecials : rest          <- args
   , elem flag ["-s", "--specials"]
@@ -292,6 +292,14 @@ main = do
     print "    -n <count> | --numbers <count>"
     print "      Specify the count of numeric digits to use"
     print "      in the password, or use default"
+    print "    -mn <count> | --min-numbers"
+    print "      Use at least the specified number of numeric"
+    print "      digits.  Not compatible with -n.  Unless "
+    print "      otherwise specified, -xn = length of word"
+    print "    -xn <count> | --max-numbers"
+    print "      Use no more than the specified number of numeric"
+    print "      digits.  Not compatible with -n.  Unless"
+    print "      otherwise specified, -mn = 0."
     print "    -s <count> | --specials <count>"
     print "      Specify the count of special characters (such as"
     print "      %, $, *, !) to use in the password, or use default"
